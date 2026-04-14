@@ -27,7 +27,7 @@ python3 -m venv venv
 # 4. Create the background service (systemd) on Port 8000
 echo "Configuring systemd service on Port 8000..."
 MY_USER=$(whoami)
-sudo bash -c "cat << EOF > /etc/systemd/system/laundry.service
+sudo bash -c "cat << 'EOF' > /etc/systemd/system/laundry.service
 [Unit]
 Description=K7 Laundry App
 After=network.target
@@ -42,12 +42,15 @@ Restart=always
 WantedBy=multi-user.target
 EOF"
 
+# Fix the MY_USER variable in the service file since we used 'EOF'
+sudo sed -i "s/\$MY_USER/$MY_USER/g" /etc/systemd/system/laundry.service
+
 # 5. Configure Nginx as a Reverse Proxy
 echo "Configuring Nginx..."
-sudo bash -c "cat << EOF > /etc/nginx/sites-available/default
+sudo bash -c "cat << 'EOF' > /etc/nginx/sites-available/default
 server {
     listen 80;
-    server_name $DOMAIN;
+    server_name \$DOMAIN;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -58,6 +61,9 @@ server {
     }
 }
 EOF"
+
+# Replace the placeholder $DOMAIN in the Nginx config
+sudo sed -i "s/\$DOMAIN/$DOMAIN/g" /etc/nginx/sites-available/default
 
 # 6. Restart everything
 echo "Starting the app and Nginx..."
