@@ -111,6 +111,18 @@ def evaluate_state(conn):
         c.execute('SELECT * FROM state WHERE id=1')
         state = dict(c.fetchone())
         
+    # Status: FREE -> If queue has people, transition to RESERVED
+    if state['status'] == 'FREE':
+        c.execute('SELECT * FROM queue ORDER BY joined_at ASC LIMIT 1')
+        next_user = c.fetchone()
+        if next_user:
+            res_end = now + (RESERVATION_WINDOW_MINS * 60)
+            c.execute('UPDATE state SET status="RESERVED", reservation_end_time=?, current_user=? WHERE id=1', (res_end, next_user['user_name']))
+            conn.commit()
+            # Re-fetch state
+            c.execute('SELECT * FROM state WHERE id=1')
+            state = dict(c.fetchone())
+            
     return state
 
 # API Endpoints
