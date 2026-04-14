@@ -40,6 +40,14 @@ def init_db():
         user_name TEXT,
         joined_at REAL
     )''')
+
+    # History table
+    c.execute('''CREATE TABLE IF NOT EXISTS history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_name TEXT,
+        finished_at REAL
+    )''')
+
     # Default state if empty
     c.execute('SELECT count(*) FROM state')
     if c.fetchone()[0] == 0:
@@ -65,6 +73,9 @@ def evaluate_state(conn):
     if state['status'] == 'IN_USE' and now > state['end_time']:
         # Cycle finished. Save this user as last_user.
         last_user = state['current_user']
+        
+        # Add to history
+        c.execute('INSERT INTO history (user_name, finished_at) VALUES (?, ?)', (last_user, now))
         
         # Check queue.
         c.execute('SELECT * FROM queue ORDER BY joined_at ASC LIMIT 1')
@@ -123,6 +134,17 @@ def get_status():
         "server_time": time.time()
     }
 
+@app.get("/api/history")
+def get_history():
+    conn = get_db()
+    c = conn.cursor()
+    # Get last 24 hours
+    one_day_ago = time.time() - (24 * 3600)
+    c.execute('SELECT user_name, finished_at FROM history WHERE finished_at > ? ORDER BY finished_at DESC', (one_day_ago,))
+    rows = c.fetchall()
+    conn.close()
+    return [{"user_name": row["user_name"], "finished_at": row["finished_at"]} for row in rows]
+
 @app.post("/api/start")
 def start_laundry(action: UserAction):
     conn = get_db()
@@ -155,6 +177,10 @@ def set_free():
     c.execute('SELECT current_user FROM state WHERE id=1')
     row = c.fetchone()
     last_user = row['current_user'] if row else None
+
+    if last_user:
+        # Add to history
+        c.execute('INSERT INTO history (user_name, finished_at) VALUES (?, ?)', (last_user, time.time()))
 
     # Reset current state and trigger evaluation
     c.execute('UPDATE state SET status="FREE", end_time=0, reservation_end_time=0, current_user=NULL, last_user=? WHERE id=1', (last_user,))
