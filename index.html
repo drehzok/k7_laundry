@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WG Laundry Hub</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --primary: #007bff;
+            --success: #28a745;
+            --warning: #ffc107;
+            --danger: #dc3545;
+            --text: #333;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text); display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; }
+        .container { max-width: 500px; width: 100%; background: var(--card-bg); padding: 2rem; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { text-align: center; margin-bottom: 1.5rem; }
+        
+        .status-card { text-align: center; padding: 1.5rem; border-radius: 10px; margin-bottom: 1.5rem; border: 2px solid transparent; }
+        .status-FREE { background-color: #e8f5e9; border-color: var(--success); color: #2e7d32; }
+        .status-IN_USE { background-color: #ffebee; border-color: var(--danger); color: #c62828; }
+        .status-RESERVED { background-color: #fff3e0; border-color: var(--warning); color: #ef6c00; }
+        
+        .status-text { font-size: 1.8rem; font-weight: bold; margin-bottom: 0.5rem; }
+        .timer-text { font-size: 1.5rem; font-family: monospace; }
+        .user-text { font-size: 1.1rem; margin-top: 0.5rem; font-style: italic; }
+
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
+        input[type="text"] { width: 100%; padding: 0.8rem; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 1rem; }
+        
+        button { width: 100%; padding: 1rem; border: none; border-radius: 5px; font-size: 1.1rem; font-weight: bold; cursor: pointer; transition: opacity 0.2s; margin-top: 0.5rem; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .btn-primary { background-color: var(--primary); color: white; }
+        .btn-danger { background-color: var(--danger); color: white; }
+        .btn-outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
+
+        .queue-section { margin-top: 2rem; border-top: 1px solid #eee; padding-top: 1rem; }
+        .queue-list { list-style: none; padding: 0; }
+        .queue-item { background: #f8f9fa; padding: 0.8rem; margin-bottom: 0.5rem; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
+        .queue-badge { background: var(--primary); color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧺 WG Laundry</h1>
+        
+        <div id="statusCard" class="status-card">
+            <div id="statusLabel" class="status-text">Loading...</div>
+            <div id="timerDisplay" class="timer-text"></div>
+            <div id="currentUserLabel" class="user-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label for="userName">Your Name:</label>
+            <input type="text" id="userName" placeholder="Enter your name..." oninput="saveName()">
+        </div>
+
+        <div class="form-group">
+            <label for="duration">Duration (minutes):</label>
+            <input type="number" id="duration" value="90" min="1" max="240">
+        </div>
+
+        <div id="actionButtons">
+            <!-- Buttons will be injected here by JS -->
+        </div>
+
+        <div class="queue-section">
+            <h3>Queue</h3>
+            <ul id="queueList" class="queue-list">
+                <!-- Queue items will be injected here -->
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let currentState = {};
+        let countdownInterval;
+
+        // Local Storage for Name
+        document.getElementById('userName').value = localStorage.getItem('laundry_name') || '';
+
+        function saveName() {
+            localStorage.setItem('laundry_name', document.getElementById('userName').value);
+            updateUI(); // Refresh buttons based on new name
+        }
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                currentState = await response.json();
+                updateUI();
+            } catch (e) {
+                console.error("Failed to fetch status", e);
+            }
+        }
+
+        function updateUI() {
+            const myName = document.getElementById('userName').value.trim();
+            const statusCard = document.getElementById('statusCard');
+            const statusLabel = document.getElementById('statusLabel');
+            const timerDisplay = document.getElementById('timerDisplay');
+            const currentUserLabel = document.getElementById('currentUserLabel');
+            const actionButtons = document.getElementById('actionButtons');
+            const queueList = document.getElementById('queueList');
+
+            // 1. Update Status Card
+            statusCard.className = `status-card status-${currentState.status}`;
+            statusLabel.textContent = currentState.status.replace('_', ' ');
+            
+            if (currentState.status === 'IN_USE') {
+                currentUserLabel.textContent = `User: ${currentState.current_user}`;
+                startCountdown(currentState.end_time);
+            } else if (currentState.status === 'RESERVED') {
+                currentUserLabel.textContent = `Reserved for: ${currentState.current_user}`;
+                startCountdown(currentState.reservation_end_time);
+            } else {
+                currentUserLabel.textContent = 'Machine is ready!';
+                timerDisplay.textContent = '--:--';
+                clearInterval(countdownInterval);
+            }
+
+            // 2. Update Action Buttons
+            actionButtons.innerHTML = '';
+            const isReservedForMe = currentState.status === 'RESERVED' && currentState.current_user === myName;
+            const isInQueue = currentState.queue.includes(myName);
+            const isCurrentlyUsing = currentState.status === 'IN_USE' && currentState.current_user === myName;
+
+            if (currentState.status === 'FREE' || isReservedForMe) {
+                const startBtn = document.createElement('button');
+                startBtn.className = 'btn-primary';
+                startBtn.textContent = 'Start Laundry';
+                startBtn.disabled = !myName;
+                startBtn.onclick = () => {
+                    const duration = parseInt(document.getElementById('duration').value) || 90;
+                    performAction('/api/start', { user_name: myName, duration_minutes: duration });
+                };
+                actionButtons.appendChild(startBtn);
+            }
+
+            if (currentState.status === 'IN_USE') {
+                if (isCurrentlyUsing) {
+                    const freeBtn = document.createElement('button');
+                    freeBtn.className = 'btn-danger';
+                    freeBtn.textContent = 'Finish Early';
+                    freeBtn.onclick = () => performAction('/api/free', {});
+                    actionButtons.appendChild(freeBtn);
+                } else if (!isInQueue) {
+                    const joinBtn = document.createElement('button');
+                    joinBtn.className = 'btn-primary';
+                    joinBtn.textContent = 'Join Queue';
+                    joinBtn.disabled = !myName;
+                    joinBtn.onclick = () => performAction('/api/queue/join', { user_name: myName });
+                    actionButtons.appendChild(joinBtn);
+                }
+            } else if (currentState.status === 'RESERVED' && !isReservedForMe && !isInQueue) {
+                const joinBtn = document.createElement('button');
+                joinBtn.className = 'btn-primary';
+                joinBtn.textContent = 'Join Queue';
+                joinBtn.disabled = !myName;
+                joinBtn.onclick = () => performAction('/api/queue/join', { user_name: myName });
+                actionButtons.appendChild(joinBtn);
+            }
+
+            if (isInQueue) {
+                const leaveBtn = document.createElement('button');
+                leaveBtn.className = 'btn-outline';
+                leaveBtn.textContent = 'Leave Queue';
+                leaveBtn.onclick = () => performAction('/api/queue/leave', { user_name: myName });
+                actionButtons.appendChild(leaveBtn);
+            }
+
+            // 3. Update Queue List
+            queueList.innerHTML = '';
+            currentState.queue.forEach((user, index) => {
+                const li = document.createElement('li');
+                li.className = 'queue-item';
+                li.innerHTML = `<span>${user}</span> <span class="queue-badge">#${index + 1}</span>`;
+                queueList.appendChild(li);
+            });
+        }
+
+        function startCountdown(targetTime) {
+            clearInterval(countdownInterval);
+            const updateTimer = () => {
+                const now = Date.now() / 1000;
+                const diff = Math.max(0, Math.floor(targetTime - now));
+                if (diff <= 0) {
+                    fetchStatus(); // Trigger lazy state update on server
+                    clearInterval(countdownInterval);
+                }
+                const mins = Math.floor(diff / 60);
+                const secs = diff % 60;
+                document.getElementById('timerDisplay').textContent = 
+                    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            };
+            updateTimer();
+            countdownInterval = setInterval(updateTimer, 1000);
+        }
+
+        async function performAction(url, body) {
+            await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            fetchStatus();
+        }
+
+        // Initial fetch and poll
+        fetchStatus();
+        setInterval(fetchStatus, 5000); // Background poll every 5s
+    </script>
+</body>
+</html>
