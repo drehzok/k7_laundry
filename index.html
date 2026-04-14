@@ -51,6 +51,7 @@
             <div id="statusLabel" class="status-text">Loading...</div>
             <div id="timerDisplay" class="timer-text"></div>
             <div id="currentUserLabel" class="user-text"></div>
+            <div id="lastUserLabel" class="user-text" style="font-size: 0.9rem; color: #666; margin-top: 10px;"></div>
         </div>
 
         <div class="form-group">
@@ -103,12 +104,15 @@
             const statusLabel = document.getElementById('statusLabel');
             const timerDisplay = document.getElementById('timerDisplay');
             const currentUserLabel = document.getElementById('currentUserLabel');
+            const lastUserLabel = document.getElementById('lastUserLabel');
             const actionButtons = document.getElementById('actionButtons');
             const queueList = document.getElementById('queueList');
 
             // 1. Update Status Card
             statusCard.className = `status-card status-${currentState.status}`;
             statusLabel.textContent = currentState.status.replace('_', ' ');
+            
+            lastUserLabel.textContent = currentState.last_user ? `Last used by: ${currentState.last_user}` : '';
             
             if (currentState.status === 'IN_USE') {
                 currentUserLabel.textContent = `User: ${currentState.current_user}`;
