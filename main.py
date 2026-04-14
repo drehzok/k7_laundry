@@ -25,8 +25,15 @@ def init_db():
         status TEXT,
         end_time REAL,
         reservation_end_time REAL,
-        current_user TEXT
+        current_user TEXT,
+        last_user TEXT
     )''')
+    # Add last_user column if it doesn't exist (for existing DBs)
+    try:
+        c.execute('ALTER TABLE state ADD COLUMN last_user TEXT')
+    except sqlite3.OperationalError:
+        pass # Already exists
+
     # Queue table
     c.execute('''CREATE TABLE IF NOT EXISTS queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +43,7 @@ def init_db():
     # Default state if empty
     c.execute('SELECT count(*) FROM state')
     if c.fetchone()[0] == 0:
-        c.execute('INSERT INTO state (id, status, end_time, reservation_end_time, current_user) VALUES (1, "FREE", 0, 0, NULL)')
+        c.execute('INSERT INTO state (id, status, end_time, reservation_end_time, current_user, last_user) VALUES (1, "FREE", 0, 0, NULL, NULL)')
     conn.commit()
     conn.close()
 
@@ -56,17 +63,20 @@ def evaluate_state(conn):
     
     # Status: IN_USE -> Check if cycle finished
     if state['status'] == 'IN_USE' and now > state['end_time']:
-        # Cycle finished. Check queue.
+        # Cycle finished. Save this user as last_user.
+        last_user = state['current_user']
+        
+        # Check queue.
         c.execute('SELECT * FROM queue ORDER BY joined_at ASC LIMIT 1')
         next_user = c.fetchone()
         
         if next_user:
             # Reserve for next user
             res_end = now + (RESERVATION_WINDOW_MINS * 60)
-            c.execute('UPDATE state SET status="RESERVED", reservation_end_time=?, current_user=? WHERE id=1', (res_end, next_user['user_name']))
+            c.execute('UPDATE state SET status="RESERVED", reservation_end_time=?, current_user=?, last_user=? WHERE id=1', (res_end, next_user['user_name'], last_user))
         else:
             # No one waiting
-            c.execute('UPDATE state SET status="FREE", end_time=0, reservation_end_time=0, current_user=NULL WHERE id=1')
+            c.execute('UPDATE state SET status="FREE", end_time=0, reservation_end_time=0, current_user=NULL, last_user=? WHERE id=1', (last_user,))
         conn.commit()
         # Re-fetch state
         c.execute('SELECT * FROM state WHERE id=1')
@@ -108,6 +118,7 @@ def get_status():
         "end_time": state['end_time'],
         "reservation_end_time": state['reservation_end_time'],
         "current_user": state['current_user'],
+        "last_user": state['last_user'],
         "queue": queue,
         "server_time": time.time()
     }
@@ -140,8 +151,13 @@ def start_laundry(action: UserAction):
 def set_free():
     conn = get_db()
     c = conn.cursor()
+    # Get current user to save as last_user
+    c.execute('SELECT current_user FROM state WHERE id=1')
+    row = c.fetchone()
+    last_user = row['current_user'] if row else None
+
     # Reset current state and trigger evaluation
-    c.execute('UPDATE state SET status="FREE", end_time=0, reservation_end_time=0, current_user=NULL WHERE id=1')
+    c.execute('UPDATE state SET status="FREE", end_time=0, reservation_end_time=0, current_user=NULL, last_user=? WHERE id=1', (last_user,))
     conn.commit()
     evaluate_state(conn)
     conn.close()
